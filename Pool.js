@@ -7,35 +7,70 @@ define(
     function($, _, Backbone) {
        
        /*   
-        *   Private Pooling Object
+        *   Pooling Object
         */
         var Pool = Backbone.Pool = function(options) {
             
             _.extend(this, _.pick(options, ['model', 'collection']));
-            this.options          = options;
+            this.options         = options;
 
-
-            this._size            = this.options.size;
-            this._used            = [];
-            this._free            = [];   
-            this._type            = this.options.type;
-            this._full            = false;
+            /*
+             * Public Instance Members
+             */
+            this.size            = this.options.size;
+            this.used            = [];
+            this.free            = [];   
+            this.type            = this.options.type;
+            this.full            = false;
            
             
-           //decorate pools pbject type with life cycle methods 
-            _.extend(this._type.prototype, {
+           /*
+            * Decorate pools object type with life cycle methods.
+            */ 
+            _.extend(this.type.prototype, {
                 free: function() {
-                    this._free.push(this._used.splice(this._used.indexOf(this), 1));
+                    this.free.push(this.used.splice(this.used.indexOf(this), 1));
+                    this.unbind();
                 },
+                /*
+                 * What if the consumer overrode a method called bindings.  In the method the specified
+                 * obects and arguments.  The implicit suggest would be that on instantiaon we will 
+                 * turn on all listeners and that  on calls to 'unbind', we have a means of turning 
+                 * off all listeners. 
+                 *
+                 * imagine...
+                 *
+                 * bindings: [
+                 *     [this.model.result.results, 'reset', <callback>, this],   
+                 *     [this.model.report.entry.content, 'change:foo', <callback>, this],   
+                 *     [this.model.this.model.summary.fields, 'reset', <callback>, this],   
+                 *     ..... 
+                 * ]
+                 *
+                 * this would give us complete control to unbind/rebind 
+                 *
+                 */
                 unbind: function() {
-                    this.modelsOff(this.model);
-                    this.collectionsOff(this.collection);
+                    var allChildren = [],
+                        collectChildrn = (function(children) {
+                            _(children).each(function(child) {
+                                collectChildren(child.children);
+                                allChildren.push(child);
+                            });
+                        })(this.children);
+                   
+                    _(allChildren).each(function(child) {
+                        this.modelsOff(child.model);
+                        this.collectionsOff(child.collection);
+                    },this);
                 },
                 rebind: function() {
+                    //need to contemplate implications of deep interface
                     throw new Error("You must implement rebind");
                 }
             });
-            this.fill();
+            
+            this.options.fill && this.fill();
         };
         
         _.extend(Pool.prototype, Backbone.Events, {
@@ -44,35 +79,35 @@ define(
              * size. After the first call fill acts as a no-op.
              */
             fill: function(options) {
-                while(!(this._full = ((this._free.length + this._used.length) === this._size))){
-                    this._free.push(new this._type);    
+                while(!(this.full = ((this.free.length + this.used.length) === this.size))){
+                    this.free.push(new this.type({ model: this.model, collection: this.collection}));    
                 }
             },
             /*
              *  Returns n free objects from the pool. If the requested object(s) exceeds available count, the size of the pool
-             *  will be increased and the user will be warned.; 
+             *  will be increased and the user will be warned. 
              */
             get: function(num) {
                 var pop, popped;
-                (num || num = 1);
+                num = num || 1;
 
-                while(num-- && (pop = this._free.pop()) {
-                    popped.push(this._used[this._used.push(pop)-1]);
-                }       
+                while(num-- && (pop = this.free.pop())) {
+                    popped.push(this.used[this.used.push(pop)-1]);
+                }      
 
                 if(popped.length < num) {
-                    console.warn('You requested more objects then originally allocated.  Adding new objects to the pool');
                     while(popped.length != num) {
-                        popped.push(this._used[this._used.push(new this._type)-1]);
+                        popped.push(this.used[this.used.push(new this.type({ model: this.model, collection: this.collection }))-1]);
+                        this.size++;
                     }
                 }
                 return popped;
             },
             drain: function() {
                 var popped;
-                while(popped = this._used.pop()){
+                while(popped = this.used.pop()){
                     popped.unbind();
-                    this._free.push(popped);
+                    this.free.push(popped);
                 }
             }
             modelsOff: function (model) {
@@ -94,7 +129,7 @@ define(
                     }, this);
                 }
                 return this;
-            },
+            }
         });
 
         return Pool;
